@@ -1,8 +1,8 @@
 # 全站榜单-Rex/Fw/Capy模块
 
-把之前的 GitHub Actions 榜单抓取，做成一个**常驻 VPS 服务**：每天定时抓取 **5 个榜单源**
+一个**常驻 VPS 服务**：每天定时抓取 **5 个榜单源**
 （骨朵 / 豆瓣 / 芒果TV / 剧场平台 / 番剧），带**网页管理面板**（填 TMDB API Key、预览各源数据），
-并**自动生成聚合 fw/rex 模块 widget.js**。
+并**自动生成聚合 fw/rex/capy 模块 widget.js**。
 
 ## 抓取的 5 个源
 | 源 | 内容 | 数据接口 |
@@ -41,14 +41,6 @@ bash <(curl -sL https://raw.githubusercontent.com/MakkaPakka518/VPS-Widget/refs/
 
 > 需要 Node.js 18+ 与 git；没有会提示安装命令。
 
-## 部署（本地上传，备选）
-```bash
-# 1) 把 vps-bangumi/ 整个目录上传到 VPS（如 /opt/bangumi）
-# 2) 一键部署（自动：环境检查 → 常驻 → 开机自启 → 放行 5555 → 验证）
-cd /opt/bangumi && bash deploy.sh
-```
-> deploy.sh 有 systemd 时用 systemd 常驻并自启，否则用 nohup + crontab @reboot。
-
 ## 使用流程
 1. 浏览器打开 `http://<VPS>:5555/`
 2. 「配置」里填 **TMDB API Key** 和 **VPS 对外地址** → 保存
@@ -82,15 +74,10 @@ nohup node server.js > server.log 2>&1 &   # 后台
 ## 生成模块
 聚合模块 `id: makka.vps.aggregator`，5 个子模块：`loadGuduo` / `loadDouban` / `loadMangoTV` /
 `loadTheater` / `loadBangumi`。条目为 `VideoItem`（`type:"tmdb"` + 数字 `tmdbId` + `mediaType`），
-点击走 Forward 内置 TMDB 详情页。数据源默认你填的 VPS 地址，也可在模块 `globalParams.baseUrl` 改。
+点击走 播放器软件 内置 TMDB 详情页。数据源默认你填的 VPS 地址，也可在模块 `globalParams.baseUrl` 改。
 
 ## 防火墙
 一键部署已尝试放行 5555；若面板打不开，检查云厂商安全组放行 `5555/TCP`：
 ```bash
 sudo ufw allow 5555/tcp
 ```
-
-## 备注
-- 本机开发环境连不上各榜单域名，**解析逻辑已离线单测**，但真实抓取需在 VPS 上点一次「更新」验证。
-- 抓取量：番剧默认 40 部、其余源照原脚本上限；VPS 无 Cloudflare 的请求数硬限制，可自行调整各源 `lib/*.js` 的 `limit`/`MAX_ITEMS`。
-- 豆瓣/芒果/剧场可能对海外 IP 或风控敏感，失败时面板会显示错误信息，可检查对应源。
