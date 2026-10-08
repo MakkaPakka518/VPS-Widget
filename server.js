@@ -1,13 +1,13 @@
 /**
- * 全站榜单 VPS 服务（骨朵/豆瓣/芒果/剧场/番剧 五源）
+ * 全站榜单 VPS 服务（骨朵/豆瓣/芒果/剧场/番剧/TMDB/B站/MAL/AniList/Trakt 十源）
  * =============================================
  * 常驻 Node 服务（默认端口 5555）：
- *   - 每天定时抓取 5 个榜单源 + TMDB 匹配
- *   - 网页管理面板：填 TMDB API Key、预览各源数据、手动更新
- *   - 自动生成聚合 fw/rex 模块 widget.js（含 5 个子模块）
+ *   - 每天定时抓取 10 个榜单源 + TMDB 匹配
+ *   - 网页管理面板：填 TMDB API Key、Trakt Token、预览各源数据、手动更新
+ *   - 自动生成聚合 fw/rex 模块 widget.js（含 10 个子模块）
  *
  * 零依赖，只需 Node.js 18+。启动： node server.js
- * 面板： http://<VPS>:5555/   数据： /data/{guduo,douban,mgtv,theater,bangumi}.json
+ * 面板： http://<VPS>:5555/   数据： /data/{guduo,douban,mgtv,theater,bangumi,tmdb,bili,mal,anilist,trakt}.json
  */
 
 const http = require("http");
@@ -28,6 +28,11 @@ const sources = {
   mgtv: require("./lib/mgtv"),
   theater: require("./lib/theater"),
   bangumi: require("./lib/bangumi"),
+  tmdb: require("./lib/tmdb_rank"),
+  bili: require("./lib/bili"),
+  mal: require("./lib/mal"),
+  anilist: require("./lib/anilist"),
+  trakt: require("./lib/trakt"),
 };
 const widget = require("./lib/widget");
 
@@ -42,6 +47,11 @@ let config = Object.assign({}, DEFAULTS, loadJson(CONFIG_FILE) || {});
 
 // ===== 登录密码 =====
 function sha256(s) { return crypto.createHash("sha256").update(String(s)).digest("hex"); }
+/** 掩码敏感 token：保留首尾 4 位，中间省略；过短则置空 */
+function maskToken(t) {
+  const s = String(t || "");
+  return s.length >= 8 ? s.slice(0, 4) + "…" + s.slice(-4) : "";
+}
 function ensurePassword() {
   if (config.password) return; // config 里已是哈希
   let pw = "admin";
@@ -85,7 +95,7 @@ async function updateSource(name) {
   updating[name] = true;
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    const data = await sources[name].fetch(config.tmdbApiKey);
+    const data = await sources[name].fetch(config.tmdbApiKey, config.traktToken || "");
     saveJson(dataFile(name), data);
     const count = countOf(name, data);
     state[name] = { last_updated: data.last_updated || bjStamp(), count, ok: true, error: "" };
@@ -217,12 +227,14 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === "/api/config" && req.method === "GET") {
-    sendJson(res, 200, { ...config });
+    // 掩码返回 trakt token，避免面板误漏（完整值仅存在 VPS 本地 config.json）
+    sendJson(res, 200, { ...config, traktToken: maskToken(config.traktToken) });
     return;
   }
   if (p === "/api/config" && req.method === "POST") {
     const body = await readBody(req);
     if (typeof body.tmdbApiKey === "string") config.tmdbApiKey = body.tmdbApiKey.trim();
+    if (typeof body.traktToken === "string" && /^[0-9a-f]{40,}$/i.test(body.traktToken.trim())) config.traktToken = body.traktToken.trim();
     if (typeof body.vpsAddress === "string") config.vpsAddress = body.vpsAddress.trim() || DEFAULTS.vpsAddress;
     if (body.updateHour !== undefined) config.updateHour = Math.min(23, Math.max(0, Number(body.updateHour) || 17));
     if (body.updateEnabled !== undefined) config.updateEnabled = !!body.updateEnabled;
@@ -278,7 +290,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`全站榜单 VPS 服务已启动： http://0.0.0.0:${PORT}`);
   console.log(`  面板： http://<VPS>:${PORT}/`);
-  console.log(`  数据： /data/{guduo,douban,mgtv,theater,bangumi}.json`);
+  console.log(`  数据： /data/{guduo,douban,mgtv,theater,bangumi,tmdb,bili,mal,anilist,trakt}.json`);
   console.log(`  模块： http://<VPS>:${PORT}/widget.js`);
   if (config.tmdbApiKey) {
     setTimeout(() => updateAll().then((r) => console.log("[startup]", r)), 1500);

@@ -71,7 +71,8 @@ if [ -f config.json ]; then
 fi
 
 # ---------- 4. 常驻启动 ----------
-if command -v systemctl >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
+# 用 /run/systemd/system 判断 systemd 是否真正作为 PID1 运行（容器/轻量实例里 systemctl 存在但 systemd 没跑）
+if [ -d /run/systemd/system ] && [ "$(id -u)" -eq 0 ]; then
   cat > /etc/systemd/system/vps-widget.service <<EOF
 [Unit]
 Description=Fullsite VPS Widget
@@ -123,6 +124,12 @@ if curl -s -o /dev/null "http://127.0.0.1:$PORT/"; then
   echo "    卸载： curl .../uninstall.sh"
   echo "=============================================="
 else
-  echo "[!] 服务未正常启动，请查看日志： $INSTALL_DIR/server.log"
+  echo "[!] 服务未正常启动，真实错误日志如下："
+  if [ -d /run/systemd/system ]; then
+    journalctl -u vps-widget -n 40 --no-pager 2>/dev/null || echo "(journalctl 无输出)"
+  else
+    cat "$INSTALL_DIR/server.log" 2>/dev/null || echo "(无 server.log)"
+  fi
+  echo "[!] 手动诊断：systemctl status vps-widget; ss -tlnp | grep $PORT; node -v"
   exit 1
 fi
