@@ -272,11 +272,17 @@ $("#save").onclick=async()=>{
 };
 $("#updateAll").onclick=async()=>{
   $("#updateAll").disabled=true; $("#updateAll").textContent="抓取中...";
-  const r=await api("/api/update","POST",{});
+  const list=[...($("#srcSelect").options||[])].map(o=>o.value);
+  const names=list.length?list:["guduo","douban","mgtv","theater","bangumi","tmdb","bili","mal","anilist","trakt"];
+  let ok=0, fail=[];
+  for(const name of names){
+    try{
+      const r=await api("/api/update","POST",{source:name});
+      if(r&&r.ok)ok++; else fail.push({source:name,error:(r&&r.error)||""});
+    }catch(e){ fail.push({source:name,error:"请求失败"}); }
+  }
   $("#updateAll").disabled=false; $("#updateAll").textContent="更新全部";
-  const ok=Object.values(r).filter(x=>x.ok).length;
-  const fail=Object.values(r).filter(x=>!x.ok);
-  const total=Object.keys(r).length;
+  const total=names.length;
   if(fail.length)msg(`完成 ${ok}/${total}，失败：${fail.map(x=>x.source).join(",")}`,false);
   else msg(`全部 ${ok}/${total} 抓取成功`);
   await loadSources(); await loadPreview();

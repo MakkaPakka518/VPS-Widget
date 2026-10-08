@@ -1,0 +1,12 @@
+{
+  "crons": [
+    { "path": "/api/cron", "schedule": "*/15 * * * *" }
+  ],
+  "rewrites": [
+    { "source": "/", "destination": "/api/index?__path=/" },
+    { "source": "/widget.js", "destination": "/api/widget" },
+    { "source": "/data/:src(.+)", "destination": "/api/data?src=:src" },
+    { "source": "/api/cron", "destination": "/api/cron" },
+    { "source": "/api/(.*)", "destination": "/api/index?__path=/api/$1" }
+  ]
+}

@@ -1,11 +1,4 @@
-# 运行时机密/生成物——严禁上传
-config.json
-.adminpass
-.port
-data/
-server.log
-server.pid
-
-# 本地辅助脚本（非一键部署所需）
-deploy.sh
-start.sh
+# Vercel 本地
+node_modules/
+.vercel/
+.env
