@@ -74,10 +74,11 @@ function isAuthed(req) {
 }
 
 // ===== 状态 =====
-// state[src] = { last_updated, count, ok, error }
+// state[src] = { last_updated, count, ok, error, running }
 const state = {};
-for (const name of Object.keys(sources)) state[name] = { last_updated: "", count: 0, ok: false, error: "" };
+for (const name of Object.keys(sources)) state[name] = { last_updated: "", count: 0, ok: false, error: "", running: false };
 let updating = {}; // 每源独立锁
+let fetching = false; // 全局：是否有抓取任务在进行
 let lastRunDate = "";
 
 function dataFile(name) { return path.join(DATA_DIR, `${name}.json`); }
@@ -93,21 +94,24 @@ async function updateSource(name) {
   if (updating[name]) return { ok: false, error: "该源已有更新任务在进行" };
   if (!config.tmdbApiKey) return { ok: false, error: "尚未配置 TMDB API Key" };
   updating[name] = true;
+  state[name].running = true;
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     const data = await sources[name].fetch(config.tmdbApiKey, config.traktToken || "");
     saveJson(dataFile(name), data);
     const count = countOf(name, data);
-    state[name] = { last_updated: data.last_updated || bjStamp(), count, ok: true, error: "" };
+    state[name] = { last_updated: data.last_updated || bjStamp(), count, ok: true, error: "", running: false };
     console.log(`[update:${name}] ok, ${count} 条`);
     return { ok: true, count, source: name };
   } catch (e) {
     state[name].error = e.message || String(e);
     state[name].ok = false;
+    state[name].running = false;
     console.error(`[update:${name}] error:`, e.message || e);
     return { ok: false, source: name, error: state[name].error };
   } finally {
     updating[name] = false;
+    state[name].running = false;
   }
 }
 
@@ -124,12 +128,18 @@ function countOf(name, data) {
 }
 
 async function updateAll() {
-  const results = {};
-  for (const name of Object.keys(sources)) {
-    results[name] = await updateSource(name);
+  if (fetching) return {};
+  fetching = true;
+  try {
+    const results = {};
+    for (const name of Object.keys(sources)) {
+      results[name] = await updateSource(name);
+    }
+    lastRunDate = todayString();
+    return results;
+  } finally {
+    fetching = false;
   }
-  lastRunDate = todayString();
-  return results;
 }
 
 // ===== 定时 =====
@@ -220,8 +230,9 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/sources" && req.method === "GET") {
     sendJson(res, 200, {
       configured: !!config.tmdbApiKey,
-      sources: Object.keys(sources).map((name) => ({ name, title: sources[name].title, ...state[name] })),
+      sources: Object.keys(sources).map((name) => ({ name, title: sources[name].title, ...state[name], running: !!updating[name] })),
       lastRunDate,
+      fetching,
     });
     return;
   }
@@ -257,15 +268,16 @@ const server = http.createServer(async (req, res) => {
 
   if (p === "/api/update" && req.method === "POST") {
     const body = await readBody(req);
+    if (!config.tmdbApiKey) return sendJson(res, 400, { ok: false, error: "尚未配置 TMDB API Key" });
     if (body.source) {
-      const r = await updateSource(body.source);
-      sendJson(res, r.ok ? 200 : 400, r);
-    } else {
-      const r = await updateAll();
-      const anyOk = Object.values(r).some((x) => x.ok);
-      sendJson(res, anyOk ? 200 : 400, r);
+      if (updating[body.source]) return sendJson(res, 409, { ok: false, error: "该源已有抓取任务在进行" });
+      // 后台抓取，立即返回；前端轮询 /api/sources 查看进度
+      updateSource(body.source).then(() => {}).catch(() => {});
+      return sendJson(res, 200, { ok: true, started: true, source: body.source });
     }
-    return;
+    if (fetching) return sendJson(res, 409, { ok: false, error: "已有抓取任务在进行" });
+    updateAll().then(() => {}).catch(() => {});
+    return sendJson(res, 200, { ok: true, started: true });
   }
 
   if (p === "/api/preview" && req.method === "GET") {
