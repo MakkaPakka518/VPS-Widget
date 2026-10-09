@@ -58,6 +58,8 @@
 
   <div id="msg"></div>
 
+  <div id="runBanner" style="display:none;margin:10px 0;padding:9px 12px;border-radius:8px;background:#fff6e5;color:#9a6200;font-size:13px;font-weight:600;"></div>
+
   <div class="card">
     <h2>各源状态</h2>
     <table class="src-table">
@@ -66,7 +68,7 @@
     </table>
     <div class="row" style="margin-top:14px;">
       <button class="btn-warn" id="updateAll">更新全部</button>
-      <span class="hint" style="margin:0;">后台串行抓取 5 个源，抓一次约需数分钟（TMDB 匹配较慢）。</span>
+      <span class="hint" style="margin:0;">后台串行抓取全部源，抓一次约需数分钟（TMDB 匹配较慢）。点「更新」后在此面板实时查看进度。</span>
     </div>
   </div>
 
@@ -200,28 +202,55 @@ $("#loginBtn").onclick=doLogin;
 $("#loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 $("#logoutBtn").onclick=()=>{localStorage.removeItem("vps_widget_token");TOKEN="";showLogin("已退出登录");};
 
+let pollTimer=null;
+function startPolling(){ if(!pollTimer) pollTimer=setInterval(loadSources,2000); }
+function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
+
 async function loadSources(){
-  const s=await api("/api/sources");
+  let s;
+  try{ s=await api("/api/sources"); }catch(e){ return; }
   sourcesMeta=s.sources||[];
+  renderSources(s);
+  const busy=!!s.fetching||sourcesMeta.some(x=>x.running);
+  const b=$("#runBanner");
+  if(busy){
+    b.style.display="block";
+    b.textContent="⏳ 正在抓取… "+sourcesMeta.filter(x=>x.running).length+"/"+sourcesMeta.length+" 个源进行中，进度将自动刷新。";
+    startPolling();
+  }else{
+    b.style.display="none";
+    stopPolling();
+  }
+}
+function renderSources(s){
   const sel=$("#srcSelect");
   const prev=sel.value||"bangumi";
-  sel.innerHTML=sourcesMeta.map(x=>`<option value="${x.name}">${x.title}</option>`).join("");
+  const list=s.sources||[];
+  sel.innerHTML=list.map(x=>`<option value="${x.name}">${x.title}</option>`).join("");
+  if(![...sel.options].some(o=>o.value===prev)&&list[0]) prev=list[0].name;
   sel.value=prev;
-  $("#srcBody").innerHTML=sourcesMeta.map(x=>`
-    <tr>
+  $("#srcBody").innerHTML=list.map(x=>{
+    const status=x.running
+      ? `<span class="badge run" style="background:#fff2cc;color:#a05a00;">抓取中…</span>`
+      : (x.ok?`<span class="badge ok">正常</span>`:`<span class="badge no">${x.error?"失败":"未抓"}</span>`);
+    return `<tr>
       <td>${x.title}</td>
-      <td>${x.ok?`<span class="badge ok">正常</span>`:`<span class="badge no">${x.error?"失败":"未抓"}</span>`}</td>
+      <td>${status}</td>
       <td>${x.count}</td>
       <td>${x.last_updated||"从未"}</td>
-      <td style="text-align:right;"><button class="btn-mini" onclick="updOne('${x.name}')">更新</button></td>
-    </tr>`).join("");
+      <td style="text-align:right;"><button class="btn-mini" ${x.running?"disabled":""} onclick="startUpdateOne('${x.name}',this)">${x.running?"抓取中":"更新"}</button></td>
+    </tr>`;
+  }).join("");
 }
-async function updOne(name){
-  const r=await api("/api/update","POST",{source:name});
-  if(r.ok)msg(`[${name}] 更新完成，${r.count} 条`);
-  else msg(`[${name}] 失败：${r.error||""}`,false);
-  await loadSources();
-  if(name===($("#srcSelect").value||"")) loadPreview();
+async function startUpdateOne(name,btn){
+  if(!btn)return;
+  btn.disabled=true; btn.textContent="启动中…";
+  try{
+    const r=await api("/api/update","POST",{source:name});
+    if(r.ok){ msg(`已开始抓取 [${name}]，进度见上方横幅`); startPolling(); }
+    else msg(r.error||"无法启动",false);
+  }catch(e){ msg("请求失败",false); }
+  loadSources();
 }
 async function loadConfig(){
   const c=await api("/api/config");
@@ -271,15 +300,14 @@ $("#save").onclick=async()=>{
   await loadConfig(); await loadWidget();
 };
 $("#updateAll").onclick=async()=>{
-  $("#updateAll").disabled=true; $("#updateAll").textContent="抓取中...";
-  const r=await api("/api/update","POST",{});
-  $("#updateAll").disabled=false; $("#updateAll").textContent="更新全部";
-  const ok=Object.values(r).filter(x=>x.ok).length;
-  const fail=Object.values(r).filter(x=>!x.ok);
-  const total=Object.keys(r).length;
-  if(fail.length)msg(`完成 ${ok}/${total}，失败：${fail.map(x=>x.source).join(",")}`,false);
-  else msg(`全部 ${ok}/${total} 抓取成功`);
-  await loadSources(); await loadPreview();
+  const btn=$("#updateAll");
+  btn.disabled=true; btn.textContent="启动中…";
+  try{
+    const r=await api("/api/update","POST",{});
+    if(r.ok){ msg("已开始抓取全部源，进度见上方横幅"); startPolling(); }
+    else msg(r.error||"无法启动",false);
+  }catch(e){ msg("请求失败",false); }
+  btn.disabled=false; btn.textContent="更新全部";
 };
 $("#copy_w").onclick=async()=>{try{await copyText($("#w_url").textContent);msg("已复制模块地址");}catch{msg("复制失败，请手动复制上方地址",false);}};
 $("#show_code").onclick=async()=>{const w=await api("/api/widget");const el=$("#w_code");el.textContent=w.code||"";el.style.display=el.style.display==="none"?"block":"none";};
